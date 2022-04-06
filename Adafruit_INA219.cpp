@@ -67,7 +67,7 @@ bool Adafruit_INA219::begin(TwoWire *theWire) {
  */
 void Adafruit_INA219::init() {
   // Set chip to large range config values to start
-  setCalibration_32V_2A();
+  setCalibration_16V_2000mA();
 }
 
 /*!
@@ -483,4 +483,110 @@ void Adafruit_INA219::setCalibration_16V_400mA() {
  *          e.g. calibration before read/write, only the final operation's
  *          result is stored.
  */
+
+
+
+
+
+
+
+
+
+void Adafruit_INA219::setCalibration_16V_2000mA() {
+
+  // Calibration which uses the highest precision for
+  // current measurement (0.1mA), at the expense of
+  // only supporting 16V at 400mA max.
+
+  // VBUS_MAX = 16V
+  // VSHUNT_MAX = 0.04          (Assumes Gain 1, 40mV)
+  // RSHUNT = 0.02               (Resistor value in ohms)
+
+  // 1. Determine max possible current
+  // MaxPossible_I = VSHUNT_MAX / RSHUNT
+  // MaxPossible_I = 2A
+
+  // 2. Determine max expected current
+  // MaxExpected_I = 2A
+
+  // 3. Calculate possible range of LSBs (Min = 15-bit, Max = 12-bit)
+  // MinimumLSB = MaxExpected_I/32767
+  // MinimumLSB = 0.00006104             (61uA per bit)
+  // MaximumLSB = MaxExpected_I/4096
+  // MaximumLSB = 0.00048828              (488uA per bit)
+
+  // 4. Choose an LSB between the min and max values
+  //    (Preferrably a roundish number close to MinLSB)
+  // CurrentLSB = 0.000100 (100uA per bit)
+
+  // 5. Compute the calibration register
+  // Cal = trunc (0.04096 / (Current_LSB * RSHUNT))    
+  // Cal = 20480
+
+  ina219_calValue = 20480;
+
+  // 6. Calculate the power LSB
+  // PowerLSB = 20 * CurrentLSB
+  // PowerLSB = 0.002 (2mW per bit)
+
+  // 7. Compute the maximum current and shunt voltage values before overflow
+  //
+  // Max_Current = Current_LSB * 32767
+  // Max_Current = 3.2767A before overflow
+  //
+  // If Max_Current > Max_Possible_I then
+  //    Max_Current_Before_Overflow = MaxPossible_I
+  // Else
+  //    Max_Current_Before_Overflow = Max_Current
+  // End If
+  //
+  // Max_Current_Before_Overflow = MaxPossible_I
+  // Max_Current_Before_Overflow = 2.0
+  //
+  // Max_ShuntVoltage = Max_Current_Before_Overflow * RSHUNT
+  // Max_ShuntVoltage = 0.04V
+  //
+  // If Max_ShuntVoltage >= VSHUNT_MAX
+  //    Max_ShuntVoltage_Before_Overflow = VSHUNT_MAX
+  // Else
+  //    Max_ShuntVoltage_Before_Overflow = Max_ShuntVoltage
+  // End If
+  //
+  // Max_ShuntVoltage_Before_Overflow = VSHUNT_MAX
+  // Max_ShuntVoltage_Before_Overflow = 0.04V
+
+  // 8. Compute the Maximum Power
+  // MaximumPower = Max_Current_Before_Overflow * VBUS_MAX
+  // MaximumPower = 2A * 16V
+  // MaximumPower = 32W
+
+  // Set multipliers to convert raw current/power values
+  ina219_currentDivider_mA = 10;    // Current LSB = 100uA per bit (1000/100 = 10)
+  ina219_powerMultiplier_mW = 2.0f; // Power LSB = 1mW per bit
+
+  // Set Calibration register to 'Cal' calculated above
+  Adafruit_BusIO_Register calibration_reg =
+      Adafruit_BusIO_Register(i2c_dev, INA219_REG_CALIBRATION, 2, MSBFIRST);
+  calibration_reg.write(ina219_calValue, 2);
+  // Set Config register to take into account the settings above
+  uint16_t config = INA219_CONFIG_BVOLTAGERANGE_16V |
+                    INA219_CONFIG_GAIN_1_40MV | INA219_CONFIG_BADCRES_12BIT |
+                    INA219_CONFIG_SADCRES_12BIT_1S_532US |
+                    INA219_CONFIG_MODE_SANDBVOLT_CONTINUOUS;
+
+  Adafruit_BusIO_Register config_reg =
+      Adafruit_BusIO_Register(i2c_dev, INA219_REG_CONFIG, 2, MSBFIRST);
+  _success = config_reg.write(config, 2);
+}
+
+/*!
+ *  @brief  Provides the the underlying return value from the last operation
+ *          called on the device.
+ *  @return true: Last operation was successful false: Last operation failed
+ *  @note   For function calls that have intermediary device operations,
+ *          e.g. calibration before read/write, only the final operation's
+ *          result is stored.
+ */
+
+
 bool Adafruit_INA219::success() { return _success; }
